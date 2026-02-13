@@ -28,14 +28,30 @@ jobs:
         ports:
           - 5432:5432
         env:
-          POSTGRES_DB: aitryon
-          POSTGRES_USER: aitryon
-          POSTGRES_PASSWORD: aitryon
+          POSTGRES_DB: ${{ vars.POSTGRES_DB || 'aitryon' }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER || 'aitryon' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'aitryon' }}
         options: >-
-          --health-cmd "pg_isready -U aitryon -d aitryon"
+          --health-cmd "pg_isready -U ${{ vars.POSTGRES_USER || 'aitryon' }} -d ${{ vars.POSTGRES_DB || 'aitryon' }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
+
+    env:
+      POSTGRES_DB: ${{ vars.POSTGRES_DB || 'aitryon' }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER || 'aitryon' }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'aitryon' }}
+      SPRING_DATASOURCE_URL: ${{ vars.SPRING_DATASOURCE_URL || format('jdbc:postgresql://localhost:5432/{0}', vars.POSTGRES_DB || 'aitryon') }}
+      SPRING_DATASOURCE_USERNAME: ${{ vars.SPRING_DATASOURCE_USERNAME || vars.POSTGRES_USER || 'aitryon' }}
+      SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD || secrets.POSTGRES_PASSWORD || 'aitryon' }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET || 'change-me-in-github-secrets' }}
+      GOOGLE_CLIENT_IDS: ${{ vars.GOOGLE_CLIENT_IDS || 'web-client-id.apps.googleusercontent.com' }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY || '' }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET || 'dev-webhook-secret' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || '' }}
+      OPENAI_IMAGE_EDIT_MODEL: ${{ vars.OPENAI_IMAGE_EDIT_MODEL || 'gpt-image-1' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '8080' }}
 
     steps:
       - name: Checkout
