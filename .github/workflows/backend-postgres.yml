@@ -18,6 +18,30 @@ on:
       - "gradlew"
       - ".github/workflows/backend-postgres.yml"
   workflow_dispatch:
+    inputs:
+      request_method:
+        description: "HTTP method for custom request"
+        required: false
+        default: "GET"
+        type: choice
+        options:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+      request_path:
+        description: "Request path starting with /, for example /api/v1/billing/packages"
+        required: false
+        default: "/api/v1/billing/packages"
+      request_body:
+        description: "Optional JSON body for POST/PUT/PATCH"
+        required: false
+        default: ""
+      keep_alive_minutes:
+        description: "Keep server alive after request (minutes, 0 to disable)"
+        required: false
+        default: "0"
 
 jobs:
   bootrun-with-postgres:
@@ -52,6 +76,10 @@ jobs:
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || '' }}
       OPENAI_IMAGE_EDIT_MODEL: ${{ vars.OPENAI_IMAGE_EDIT_MODEL || 'gpt-image-1' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '8080' }}
+      CUSTOM_REQUEST_METHOD: ${{ inputs.request_method || 'GET' }}
+      CUSTOM_REQUEST_PATH: ${{ inputs.request_path || '/api/v1/billing/packages' }}
+      CUSTOM_REQUEST_BODY: ${{ inputs.request_body || '' }}
+      KEEP_ALIVE_MINUTES: ${{ inputs.keep_alive_minutes || '0' }}
 
     steps:
       - name: Checkout
@@ -79,7 +107,7 @@ jobs:
           echo "Postgres did not become reachable in time"
           exit 1
 
-      - name: Start backend and run smoke check
+      - name: Start backend and send API requests
         run: |
           ./gradlew --no-daemon bootRun > server.log 2>&1 &
           APP_PID=$!
@@ -89,14 +117,59 @@ jobs:
           }
           trap cleanup EXIT
 
+          SERVER_READY="false"
           for i in {1..60}; do
             if curl -fsS "http://127.0.0.1:${SERVER_PORT}/api/v1/billing/packages" >/dev/null; then
               echo "Server is up and responded successfully."
-              exit 0
+              SERVER_READY="true"
+              break
             fi
             sleep 2
           done
 
-          echo "Backend did not start in time. Last logs:"
-          tail -n 200 server.log || true
-          exit 1
+          if [ "${SERVER_READY}" != "true" ]; then
+            echo "Smoke check failed. Last logs:"
+            tail -n 200 server.log || true
+            exit 1
+          fi
+
+          echo "Smoke check passed."
+
+          TARGET_URL="http://127.0.0.1:${SERVER_PORT}${CUSTOM_REQUEST_PATH}"
+          echo "Sending ${CUSTOM_REQUEST_METHOD} ${TARGET_URL}"
+
+          if [ -n "${CUSTOM_REQUEST_BODY}" ]; then
+            RESPONSE=$(
+              curl -sS -w '\n%{http_code}' \
+                -X "${CUSTOM_REQUEST_METHOD}" \
+                -H "Content-Type: application/json" \
+                --data "${CUSTOM_REQUEST_BODY}" \
+                "${TARGET_URL}"
+            )
+          else
+            RESPONSE=$(
+              curl -sS -w '\n%{http_code}' \
+                -X "${CUSTOM_REQUEST_METHOD}" \
+                "${TARGET_URL}"
+            )
+          fi
+
+          HTTP_STATUS="$(echo "${RESPONSE}" | tail -n1)"
+          RESPONSE_BODY="$(echo "${RESPONSE}" | sed '$d')"
+
+          echo "Custom request status: ${HTTP_STATUS}"
+          echo "Custom request body:"
+          echo "${RESPONSE_BODY}"
+
+          if [ "${KEEP_ALIVE_MINUTES}" != "0" ]; then
+            echo "Keeping backend alive for ${KEEP_ALIVE_MINUTES} minute(s)..."
+            sleep "$((KEEP_ALIVE_MINUTES * 60))"
+          fi
+
+      - name: Upload backend logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-server-log
+          path: server.log
+          if-no-files-found: ignore
